@@ -45,14 +45,14 @@ static uint32_t alive_nthreads = 0;
 static spinlock_t threads_lock = SPINLOCK_INIT;
 
 static thread_t *alive_threads[MAX_THREADS];
-static thread_t *threads_by_order[MAX_THREADS];
+thread_t *libtload_threads_by_order[MAX_THREADS];
 
 static real_args_t vec[MAX_THREADS];
 static int veci = 0;
 static uint32_t order = 0;
 
 #define WRAPPER_LABEL(LABEL)                     LABEL
-#define REAL_LABEL(LABEL)                        libmapping_connect_real_##LABEL
+#define REAL_LABEL(LABEL)                        libtload_connect_real_##LABEL
 #define DECLARE_WRAPPER(LABEL, RETTYPE, ...)     static RETTYPE (*REAL_LABEL(LABEL)) (__VA_ARGS__) = NULL
 
 DECLARE_WRAPPER(pthread_create, int, pthread_t*, const pthread_attr_t*, void *(*)(void*), void*);
@@ -102,7 +102,7 @@ static void init()
 	for (i=0; i<MAX_THREADS; i++) {
 		threads[i].stat = THREAD_AVL;
 		alive_threads[i] = NULL;
-		threads_by_order[i] = NULL;
+		libtload_threads_by_order[i] = NULL;
 	}
 }
 
@@ -174,7 +174,7 @@ static thread_t* thread_created (uint32_t order)
 	ASSERT(t->stat == THREAD_AVL)
 	
 	alive_threads[alive_nthreads] = t;
-	threads_by_order[order] = t;
+	libtload_threads_by_order[order] = t;
 	t->alive_pos = alive_nthreads;
 
 	t->stat = THREAD_ALIVE;
@@ -226,7 +226,13 @@ static void* create_head (void *arg)
 	void *r;
 	
 	thread = thread_created(a->order);
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	libtload_papi_thread_init(thread);
+#endif
 	r = a->fn(a->arg);
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	libtload_papi_thread_finish(thread);
+#endif
 	thread_destroyed(thread);
 	
 	return r;
@@ -259,7 +265,11 @@ void WRAPPER_LABEL(pthread_exit) (void *retval)
 		REAL_LABEL(pthread_exit)(retval);
 		return;
 	}
-	
+
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	libtload_papi_thread_finish(thread);
+#endif
+
 	thread_destroyed(thread);
 	REAL_LABEL(pthread_exit)(retval);
 }
@@ -273,8 +283,15 @@ static void __attribute__((constructor)) triggered_on_app_start ()
 	ASSERT(sizeof(unsigned long) == sizeof(void*))
 
 	init();
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	libtload_papi_init();
+#endif
 
 	thread = thread_created( get_next_order_id() );
+
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	libtload_papi_thread_init(thread);
+#endif
 
 	dprintf("initialized!\n");
 }
@@ -286,9 +303,20 @@ static void __attribute__((destructor)) triggered_on_app_end ()
 	uint64_t load;
 	
 	dprintf("app ended, %u threads were created\n", libtload_nthreads_total);
+
+#ifdef LIBTLOAD_SUPPORT_PAPI
+{
+	for (i=0; i<MAX_THREADS; i++) {
+		if (threads[i].stat == THREAD_ALIVE) {
+			libtload_papi_thread_finish(&threads[i]);
+		}
+	}
+	libtload_papi_finish();
+}
+#endif
 	
 	for (i=0; i<libtload_nthreads_total; i++) {
-		t = threads_by_order[i];
+		t = libtload_threads_by_order[i];
 		
 		if (likely(t) && t->stat == THREAD_ALIVE) {
 			load = get_thread_load(t->kernel_pid, t->kernel_tid);

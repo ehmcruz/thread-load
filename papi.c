@@ -31,6 +31,8 @@ static int start, last;
 static char native_counters_list[PAPI_MAX_EVENTS][64];
 static int papi_enabled = 0;
 
+extern thread_t *libtload_threads_by_order[MAX_THREADS];
+
 static int papi_thread_id()
 {
 	return libtload_get_current_thread()->order_id;
@@ -57,14 +59,14 @@ void libtload_papi_thread_init (thread_t *t)
 		}
 		retval = PAPI_event_name_to_code( native_counters_list[i], &native );
 		ASSERT( retval == PAPI_OK )
-		dprintf( "Trying to add event %i (%s)\n", i, native_counters_list[i] );
+/*		dprintf( "Trying to add event %i (%s)\n", i, native_counters_list[i] );*/
 		if ( ( retval = PAPI_add_event( papi_per_thread[id].EventSet, native ) ) != PAPI_OK ) {
-			dprintf("\tfail %i\n", retval);
+			dprintf("fail to add event %i (%s) code %i\n", i, native_counters_list[i], retval);
 			break;
 		}
 		else {
 			papi_per_thread[id].event_count++;
-			dprintf("\tok\n");
+/*			dprintf("\tok\n");*/
 		}
 	}
 	
@@ -91,14 +93,15 @@ void libtload_papi_init ()
 	
 	counter_list = libtload_env_get_str("PAPI_COUNTER_LIST");
 	if (counter_list == NULL) {
-		lm_printf("papi env var %s undefined\n", libtload_envname(ENV_libtload_PAPI_COUNTER_LIST));
+		dprintf("papi env var PAPI_COUNTER_LIST undefined, disabling PAPI\n");
 		return;
 	}
 	
 	fname = libtload_env_get_str("PAPI_FNAME_LOCK");
 	if (fname == NULL) {
-		lm_printf("papi env var %s undefined\n", libtload_envname(ENV_libtload_PAPI_FNAME_LOCK));
-		return;
+		static const char default_name[] = "/tmp/ehmcruz-thread-load-lib.lock";
+		fname = default_name;
+		dprintf("papi env var PAPI_FNAME_LOCK undefined, using default file %s\n", fname);
 	}
 	
 	fname_results = libtload_env_get_str("PAPI_FNAME_RESULTS");
@@ -131,12 +134,12 @@ void libtload_papi_init ()
 	}
 	
 	if (start == (total_event_count)) {
-		lm_printf("papi finish\n");
+		dprintf("papi finish\n");
 		fp = fopen(fname, "w");
 		ASSERT(fp != NULL);
 		fprintf(fp, "finish");
 		fclose(fp);
-		libtload_panic(0);
+		exit(0);
 	}
 	else {	
 		dprintf("starting from event %i of %i (%s)\n", start, total_event_count-1, native_counters_list[start]);
@@ -179,7 +182,7 @@ void libtload_papi_finish ()
 {
 	int i, j, id;
 	FILE *fp;
-	static char buffer1[200], buffer2[200];
+	thread_t *t;
 	
 	if (!papi_enabled)
 		return;
@@ -190,12 +193,14 @@ void libtload_papi_finish ()
 	fclose(fp);
 
 	for (id=0; id<libtload_get_total_nthreads(); id++) {
-		j = 0;
-		for ( i = start; i<=last; i++ ) {
-			sprintf(buffer1, "%-30s: %llu", native_counters_list[i], papi_per_thread[id].values[j] );
-			sprintf(buffer2, "papi == %i == %s == %llu\n", id, native_counters_list[i], papi_per_thread[id].values[j] );
-/*			libtload_statistics_add(buffer1, buffer2);*/
-			j++;
+		t = libtload_threads_by_order[id];
+		
+		if (likely(t)) {
+			j = 0;
+			for ( i = start; i<=last; i++ ) {
+				dprintf("thread %-4i: %llu\n", t->order_id, native_counters_list[i], papi_per_thread[t->order_id].values[j] );
+				j++;
+			}
 		}
 	}
 }

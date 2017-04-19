@@ -40,7 +40,7 @@ papi.o: papi.c $(headerfiles)
 	$(CC) -c papi.c -o papi.o $(CFLAGS) -DLIBTLOAD_SUPPORT_PAPI
 
 $(libnamedynpapi): connect-papi.o lib.o papi.o
-	$(CC) connect-papi.o lib.o papi.o -o $(libnamedynpapi) $(CFLAGS) $(LDFLAGS)
+	$(CC) connect-papi.o lib.o papi.o -o $(libnamedynpapi) $(CFLAGS) $(LDFLAGS) -lpapi
 
 #######################
 
