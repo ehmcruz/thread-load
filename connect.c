@@ -4,6 +4,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <pthread.h>
 #include <dlfcn.h>
 #include <unistd.h>
@@ -39,7 +40,7 @@ typedef struct real_args_t {
 } real_args_t;
 
 thread_t threads[MAX_THREADS] __attribute__ ((aligned(CACHE_LINE_SIZE)));
-static uint32_t nthreads_total = 0;
+uint32_t libtload_nthreads_total = 0;
 static uint32_t alive_nthreads = 0;
 static spinlock_t threads_lock = SPINLOCK_INIT;
 
@@ -105,7 +106,12 @@ static void init()
 	}
 }
 
-static uint32_t get_current_thread_order_id ()
+thread_t* libtload_get_current_thread ()
+{
+	return thread;
+}
+
+uint32_t libtload_get_current_thread_order_id ()
 {
 	return thread->order_id;
 }
@@ -161,9 +167,9 @@ static thread_t* thread_created (uint32_t order)
 	
 	spinlock_lock(&threads_lock);
 
-	ASSERT_PRINTF(nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
+	ASSERT_PRINTF(libtload_nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
 	
-	t = &threads[nthreads_total];
+	t = &threads[libtload_nthreads_total];
 
 	ASSERT(t->stat == THREAD_AVL)
 	
@@ -172,7 +178,7 @@ static thread_t* thread_created (uint32_t order)
 	t->alive_pos = alive_nthreads;
 
 	t->stat = THREAD_ALIVE;
-	t->pos = nthreads_total;
+	t->pos = libtload_nthreads_total;
 
 	t->kernel_pid = kpid;
 	t->kernel_tid = ktid;
@@ -181,7 +187,7 @@ static thread_t* thread_created (uint32_t order)
 	__sync_synchronize();
 
 	alive_nthreads++;
-	nthreads_total++;
+	libtload_nthreads_total++;
 	
 	spinlock_unlock(&threads_lock);
 	
@@ -258,11 +264,6 @@ void WRAPPER_LABEL(pthread_exit) (void *retval)
 	REAL_LABEL(pthread_exit)(retval);
 }
 
-static thread_t* get_current_thread ()
-{
-	return thread;
-}
-
 static void __attribute__((constructor)) triggered_on_app_start ()
 {
 	ATTACH_FUNC(pthread_create)
@@ -284,9 +285,9 @@ static void __attribute__((destructor)) triggered_on_app_end ()
 	thread_t *t;
 	uint64_t load;
 	
-	dprintf("app ended, %u threads were created\n", nthreads_total);
+	dprintf("app ended, %u threads were created\n", libtload_nthreads_total);
 	
-	for (i=0; i<nthreads_total; i++) {
+	for (i=0; i<libtload_nthreads_total; i++) {
 		t = threads_by_order[i];
 		
 		if (likely(t) && t->stat == THREAD_ALIVE) {

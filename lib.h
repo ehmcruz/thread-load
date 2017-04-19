@@ -2,6 +2,7 @@
 #define __LIBTLOAD_H__
 
 #include <stdint.h>
+#include <sys/types.h>
 
 #define MAX_THREADS 1024
 #define CACHE_LINE_SIZE 64
@@ -36,5 +37,17 @@ typedef struct thread_t {
 	uint32_t alive_pos;
 	thread_stat_t stat;
 }  __attribute__ ((aligned(CACHE_LINE_SIZE))) thread_t;
+
+static inline uint32_t libtload_get_total_nthreads ()
+{
+	extern uint32_t libtload_nthreads_total;
+	return libtload_nthreads_total;
+}
+
+thread_t* libtload_get_current_thread ();
+uint32_t libtload_get_current_thread_order_id ();
+
+char* libtload_env_get_str(char *envname);
+char* libtload_strtok (char *str, char *tok, char del, uint32_t bsize);
 
 #endif
