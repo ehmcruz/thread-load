@@ -4,7 +4,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <pthread.h>
 #include <dlfcn.h>
 #include <unistd.h>
@@ -17,33 +16,15 @@
 	#include <omp.h>
 #endif
 
+#include "lib.h"
+
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	#include "papi.h"
+#endif
+
 #include "spinlock.h"
 
-#define MAX_THREADS 1024
-#define CACHE_LINE_SIZE 64
 #define BUFFER_SIZE 2048
-
-#define likely(x)       __builtin_expect((x),1)
-#define unlikely(x)     __builtin_expect((x),0)
-
-#define ASSERT(V) ASSERT_dprintf(V, "bye!\n")
-
-#define ASSERT_dprintf(V, ...) \
-	if (unlikely(!(V))) { \
-		dprintf("sanity error!\nfile %s at line %u assertion failed!\n%s\n", __FILE__, __LINE__, #V); \
-		dprintf(__VA_ARGS__); \
-		exit(1); \
-	}
-
-#define dprintf(...) printf("task load lib: " __VA_ARGS__)
-
-typedef uint16_t thread_stat_t;
-
-enum {
-	THREAD_AVL,
-	THREAD_ALIVE,
-	THREAD_DEAD
-};
 
 static const char *stat_str[] = {
 	"avl",
@@ -51,22 +32,13 @@ static const char *stat_str[] = {
 	"dead"
 };
 
-typedef struct thread_t {
-	pid_t kernel_tid;
-	pid_t kernel_pid;
-	uint32_t order_id;
-	uint32_t pos;
-	uint32_t alive_pos;
-	thread_stat_t stat;
-}  __attribute__ ((aligned(CACHE_LINE_SIZE))) thread_t;
-
 typedef struct real_args_t {
 	void *arg;
 	void *(*fn)(void*);
 	uint32_t order;
 } real_args_t;
 
-static thread_t threads[MAX_THREADS] __attribute__ ((aligned(CACHE_LINE_SIZE)));
+thread_t threads[MAX_THREADS] __attribute__ ((aligned(CACHE_LINE_SIZE)));
 static uint32_t nthreads_total = 0;
 static uint32_t alive_nthreads = 0;
 static spinlock_t threads_lock = SPINLOCK_INIT;
@@ -189,7 +161,7 @@ static thread_t* thread_created (uint32_t order)
 	
 	spinlock_lock(&threads_lock);
 
-	ASSERT_dprintf(nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
+	ASSERT_PRINTF(nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
 	
 	t = &threads[nthreads_total];
 
