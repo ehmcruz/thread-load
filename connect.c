@@ -206,6 +206,8 @@ static thread_t* thread_created (uint32_t order)
 	t->kernel_tid = ktid;
 	t->order_id = order;
 
+	__sync_synchronize();
+
 	alive_nthreads++;
 	nthreads_total++;
 	
@@ -310,7 +312,7 @@ static void __attribute__((destructor)) triggered_on_app_end ()
 	thread_t *t;
 	uint64_t load;
 	
-	dprintf("app ended\n");
+	dprintf("app ended, %u threads were created\n", nthreads_total);
 	
 	for (i=0; i<nthreads_total; i++) {
 		t = threads_by_order[i];
