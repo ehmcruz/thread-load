@@ -9,6 +9,9 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <asm/unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #if defined(_OPENMP)
 	#include <omp.h>
@@ -18,18 +21,21 @@
 
 #define MAX_THREADS 1024
 #define CACHE_LINE_SIZE 64
+#define BUFFER_SIZE 2048
 
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 
-#define ASSERT(V) ASSERT_PRINTF(V, "bye!\n")
+#define ASSERT(V) ASSERT_dprintf(V, "bye!\n")
 
-#define ASSERT_PRINTF(V, ...) \
+#define ASSERT_dprintf(V, ...) \
 	if (unlikely(!(V))) { \
-		printf("sanity error!\nfile %s at line %u assertion failed!\n%s\n", __FILE__, __LINE__, #V); \
-		printf(__VA_ARGS__); \
+		dprintf("sanity error!\nfile %s at line %u assertion failed!\n%s\n", __FILE__, __LINE__, #V); \
+		dprintf(__VA_ARGS__); \
 		exit(1); \
 	}
+
+#define dprintf(...) printf("task load lib: " __VA_ARGS__)
 
 typedef uint16_t thread_stat_t;
 
@@ -39,8 +45,15 @@ enum {
 	THREAD_DEAD
 };
 
+static const char *stat_str[] = {
+	"avl",
+	"alive",
+	"dead"
+};
+
 typedef struct thread_t {
 	pid_t kernel_tid;
+	pid_t kernel_pid;
 	uint32_t order_id;
 	uint32_t pos;
 	uint32_t alive_pos;
@@ -58,8 +71,8 @@ static uint32_t nthreads_total = 0;
 static uint32_t alive_nthreads = 0;
 static spinlock_t threads_lock = SPINLOCK_INIT;
 
-thread_t *alive_threads[MAX_THREADS];
-thread_t *threads_by_order[MAX_THREADS];
+static thread_t *alive_threads[MAX_THREADS];
+static thread_t *threads_by_order[MAX_THREADS];
 
 static real_args_t vec[MAX_THREADS];
 static int veci = 0;
@@ -81,7 +94,7 @@ static __thread thread_t *thread = (thread_t*)&dummy_thread;
 	if (unlikely(REAL_LABEL(FUNC) == NULL)) {\
 		REAL_LABEL(FUNC) = dlsym(RTLD_NEXT, #FUNC); \
 		if (REAL_LABEL(FUNC) == NULL) {\
-			printf("failed to attach " #FUNC "\n"); \
+			dprintf("failed to attach " #FUNC "\n"); \
 			if (MUST) \
 				exit(1); \
 		}\
@@ -91,7 +104,7 @@ static __thread thread_t *thread = (thread_t*)&dummy_thread;
 	if (unlikely(REAL_LABEL(FUNC) == NULL)) {\
 		REAL_LABEL(FUNC) = dlvsym(RTLD_NEXT, #FUNC, VERSION); \
 		if (REAL_LABEL(FUNC) == NULL) {\
-			printf("failed to attach " #FUNC "\n"); \
+			dprintf("failed to attach " #FUNC "\n"); \
 			if (MUST) \
 				exit(1); \
 		}\
@@ -125,13 +138,58 @@ static uint32_t get_current_thread_order_id ()
 	return thread->order_id;
 }
 
-static thread_t* thread_created (uint32_t order, pid_t ktid)
+static uint64_t get_thread_load (pid_t kpid, pid_t ktid)
+{
+	char buffer[BUFFER_SIZE];
+	int fd;
+	ssize_t num_read;
+	int32_t i;
+	char *p;
+	uint64_t jiffies_user;
+
+	sprintf(buffer, "/proc/%u/task/%u/stat", (uint32_t)kpid, (uint32_t)ktid);
+	fd = open(buffer, O_RDONLY, 0);
+	if (fd == -1) {
+		dprintf("ERROR! can't open %s\n", buffer);
+		return 0;
+	}
+	
+	num_read = read(fd, buffer, BUFFER_SIZE);
+	close(fd);
+	
+	if (num_read == BUFFER_SIZE) {
+		dprintf("ERROR! file size is too long to fit in our buffer (size %u)\n", BUFFER_SIZE);
+		return 0;
+	}
+
+	buffer[num_read] = 0;
+
+	p = strrchr(buffer, ')') + 1;
+
+	for (i=3; i!=14; i++)
+		p = strchr(p+1, ' ');
+
+	p++;
+/*	printf("buffer: %s\n", buffer);*/
+/*	printf("p: %s\n", p);*/
+	jiffies_user = strtoull(p, NULL, 10);
+	
+/*	long jiffies_sys = atol(strchr(ptrUsr,' ') + 1) ;*/
+
+	return jiffies_user;
+}
+
+static thread_t* thread_created (uint32_t order)
 {
 	thread_t *t;
+	pid_t ktid, kpid;
+	
+	kpid = getpid();
+	ktid = syscall(__NR_gettid);
 	
 	spinlock_lock(&threads_lock);
 
-	ASSERT_PRINTF(nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
+	ASSERT_dprintf(nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
 	
 	t = &threads[nthreads_total];
 
@@ -144,6 +202,7 @@ static thread_t* thread_created (uint32_t order, pid_t ktid)
 	t->stat = THREAD_ALIVE;
 	t->pos = nthreads_total;
 
+	t->kernel_pid = kpid;
 	t->kernel_tid = ktid;
 	t->order_id = order;
 
@@ -152,7 +211,7 @@ static thread_t* thread_created (uint32_t order, pid_t ktid)
 	
 	spinlock_unlock(&threads_lock);
 	
-	printf("thread created %u\n", t->order_id);
+	dprintf("thread created %u kpid %u ktid %u\n", t->order_id, (uint32_t)t->kernel_pid, (uint32_t)t->kernel_tid);
 
 	return t;
 }
@@ -178,7 +237,7 @@ static void thread_destroyed (thread_t *t)
 	
 	spinlock_unlock(&threads_lock);
 
-	printf("thread destroyed (order_id=%u old_pos=%u new_pos=%u)\n", t->order_id, old_pos, new_pos);
+	dprintf("thread destroyed (order_id=%u old_pos=%u new_pos=%u)\n", t->order_id, old_pos, new_pos);
 }
 
 static void* create_head (void *arg)
@@ -186,7 +245,7 @@ static void* create_head (void *arg)
 	real_args_t *a = arg;
 	void *r;
 	
-	thread = thread_created(a->order, syscall(__NR_gettid));
+	thread = thread_created(a->order);
 	r = a->fn(a->arg);
 	thread_destroyed(thread);
 	
@@ -199,7 +258,7 @@ int WRAPPER_LABEL(pthread_create) (pthread_t *thread, const pthread_attr_t *attr
 	int pos;
 	
 /*	if (unlikely(!initialized)) {*/
-/*		printf("skipping tracking of thread\n");*/
+/*		dprintf("skipping tracking of thread\n");*/
 /*		return REAL_LABEL(pthread_create)(thread, attr, start_routine, arg);*/
 /*	}*/
 
@@ -240,13 +299,26 @@ static void __attribute__((constructor)) triggered_on_app_start ()
 
 	init();
 
-	thread = thread_created( get_next_order_id(), syscall(__NR_gettid) );
+	thread = thread_created( get_next_order_id() );
 
-	printf("initialized!\n");
+	dprintf("initialized!\n");
 }
 
 static void __attribute__((destructor)) triggered_on_app_end ()
 {
-	printf("app ended\n");
+	uint32_t i;
+	thread_t *t;
+	uint64_t load;
+	
+	dprintf("app ended\n");
+	
+	for (i=0; i<nthreads_total; i++) {
+		t = threads_by_order[i];
+		
+		if (likely(t) && t->stat == THREAD_ALIVE) {
+			load = get_thread_load(t->kernel_pid, t->kernel_tid);
+			dprintf("load of thread (%s) order_id %u is %llu\n", stat_str[t->stat], t->order_id, load);
+		}
+	}
 }
 
