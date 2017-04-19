@@ -99,9 +99,7 @@ void libtload_papi_init ()
 	
 	fname = libtload_env_get_str("PAPI_FNAME_LOCK");
 	if (fname == NULL) {
-		static const char default_name[] = "/tmp/ehmcruz-thread-load-lib.lock";
-		fname = default_name;
-		dprintf("papi env var PAPI_FNAME_LOCK undefined, using default file %s\n", fname);
+		dprintf("papi env var PAPI_FNAME_LOCK undefined, init from beginning\n");
 	}
 	
 	fname_results = libtload_env_get_str("PAPI_FNAME_RESULTS");
@@ -124,26 +122,31 @@ void libtload_papi_init ()
 		papi_per_thread[i].event_count = 0;
 	}
 	
-	fp = fopen(fname, "r");
-	if (!fp)
-		start = 0;
-	else {
-		fscanf(fp, "%i", &start);
-		fclose(fp);
-		start++;
-	}
+	if (fname) {
+		fp = fopen(fname, "r");
+		if (!fp)
+			start = 0;
+		else {
+			fscanf(fp, "%i", &start);
+			fclose(fp);
+			start++;
+		}
 	
-	if (start == (total_event_count)) {
-		dprintf("papi finish\n");
-		fp = fopen(fname, "w");
-		ASSERT(fp != NULL);
-		fprintf(fp, "finish");
-		fclose(fp);
-		exit(0);
+		if (start == (total_event_count)) {
+			dprintf("papi finish\n");
+			fp = fopen(fname, "w");
+			ASSERT(fp != NULL);
+			fprintf(fp, "finish");
+			fclose(fp);
+			exit(0);
+		}
+		else {	
+			dprintf("starting from event %i of %i (%s)\n", start, total_event_count-1, native_counters_list[start]);
+		}
 	}
-	else {	
-		dprintf("starting from event %i of %i (%s)\n", start, total_event_count-1, native_counters_list[start]);
-	}
+	else
+		start = 0;
+
 	
 	ASSERT_PRINTF( ( retval = PAPI_library_init( PAPI_VER_CURRENT ) ) == PAPI_VER_CURRENT, "PAPI_library_init %i\n", retval);
 
@@ -187,10 +190,12 @@ void libtload_papi_finish ()
 	if (!papi_enabled)
 		return;
 
-	fp = fopen(fname, "w");
-	ASSERT(fp != NULL);
-	fprintf(fp, "%i", last);
-	fclose(fp);
+	if (fname) {
+		fp = fopen(fname, "w");
+		ASSERT(fp != NULL);
+		fprintf(fp, "%i", last);
+		fclose(fp);
+	}
 
 	for (id=0; id<libtload_get_total_nthreads(); id++) {
 		t = libtload_threads_by_order[id];
@@ -198,7 +203,7 @@ void libtload_papi_finish ()
 		if (likely(t)) {
 			j = 0;
 			for ( i = start; i<=last; i++ ) {
-				dprintf("thread %-4i: %llu\n", t->order_id, native_counters_list[i], papi_per_thread[t->order_id].values[j] );
+				dprintf("thread %-4i %-30s: %llu\n", t->order_id, native_counters_list[i], papi_per_thread[t->order_id].values[j] );
 				j++;
 			}
 		}
