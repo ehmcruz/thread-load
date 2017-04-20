@@ -18,13 +18,8 @@
 	"rapl:::PP0_ENERGY:PACKAGE1",
 */
 
-typedef struct papi_native_thread_local_t {
-	int EventSet;
-	long long values[PAPI_MAX_EVENTS];
-	int event_count;
-} papi_native_thread_local_t;
+extern thread_t libtload_threads[MAX_THREADS];
 
-static papi_native_thread_local_t papi_per_thread[MAX_THREADS];
 static uint32_t total_event_count;
 static char *fname, *fname_results = NULL;
 static int start, last;
@@ -42,44 +37,41 @@ void libtload_papi_thread_init (thread_t *t)
 {
 	static int exclusion = 0;
 	int retval, i, native;
-	uint32_t id;
 	
 	if (!papi_enabled)
 		return;
-	
-	id = t->order_id;
-	
-	ASSERT_PRINTF(( retval = PAPI_create_eventset( &(papi_per_thread[id].EventSet) ) ) == PAPI_OK, "PAPI_create_eventset id %i error %i\n", id, retval)
+		
+	ASSERT_PRINTF(( retval = PAPI_create_eventset( &(t->EventSet) ) ) == PAPI_OK, "PAPI_create_eventset id %i error %i\n", t->order_id, retval)
 
-	papi_per_thread[id].event_count = 0;
+	t->event_count = 0;
 	for (i=start; i<total_event_count; i++) {
-		if (papi_per_thread[id].event_count >= PAPI_MAX_EVENTS) {
-			dprintf("Maximum number of PAPI events (%u) reached for thread %u\n", PAPI_MAX_EVENTS, id);
+		if (t->event_count >= PAPI_MAX_EVENTS) {
+			dprintf("Maximum number of PAPI events (%u) reached for thread %u\n", PAPI_MAX_EVENTS, t->order_id);
 			break;
 		}
 		retval = PAPI_event_name_to_code( native_counters_list[i], &native );
 		ASSERT( retval == PAPI_OK )
 /*		dprintf( "Trying to add event %i (%s)\n", i, native_counters_list[i] );*/
-		if ( ( retval = PAPI_add_event( papi_per_thread[id].EventSet, native ) ) != PAPI_OK ) {
+		if ( ( retval = PAPI_add_event( t->EventSet, native ) ) != PAPI_OK ) {
 			dprintf("fail to add event %i (%s) code %i\n", i, native_counters_list[i], retval);
 			break;
 		}
 		else {
-			papi_per_thread[id].event_count++;
+			t->event_count++;
 /*			dprintf("\tok\n");*/
 		}
 	}
 	
 	if (! __sync_lock_test_and_set(&exclusion, 1) ) {
-		last += papi_per_thread[id].event_count - 1;
+		last += t->event_count - 1;
 		__sync_synchronize();
 		ASSERT(last >= start);
 	}
 
-	for (i=0; i<papi_per_thread[id].event_count; i++)
-		papi_per_thread[id].values[i] = 0;
+	for (i=0; i<t->event_count; i++)
+		t->values[i] = 0;
 	
-	ASSERT_PRINTF( ( retval = PAPI_start( papi_per_thread[id].EventSet ) ) == PAPI_OK, "PAPI_start %i\n", retval);
+	ASSERT_PRINTF( ( retval = PAPI_start( t->EventSet ) ) == PAPI_OK, "PAPI_start %i\n", retval);
 }
 
 void libtload_papi_init ()
@@ -104,8 +96,6 @@ void libtload_papi_init ()
 	
 	fname_results = libtload_env_get_str("PAPI_FNAME_RESULTS");
 	
-	papi_enabled = 1;
-	
 	p = counter_list;
 	i = 0;
 	p = libtload_strtok(p, native_counters_list[i], ',', 64);
@@ -118,8 +108,8 @@ void libtload_papi_init ()
 	total_event_count = i;
 	
 	for (i=0; i<MAX_THREADS; i++) {
-		papi_per_thread[i].EventSet = PAPI_NULL;
-		papi_per_thread[i].event_count = 0;
+		libtload_threads[i].EventSet = PAPI_NULL;
+		libtload_threads[i].event_count = 0;
 	}
 	
 	if (fname) {
@@ -157,27 +147,28 @@ void libtload_papi_init ()
 	
 	for (i=0; i<MAX_THREADS; i++) {
 		for (j=0; j<PAPI_MAX_EVENTS; j++)
-			papi_per_thread[i].values[j] = 0;
+			libtload_threads[i].values[j] = 0;
 	}
 
 	dprintf("Architecture %s, %d\n", hwinfo->model_string, hwinfo->model);
+
+	__sync_synchronize();
+	
+	papi_enabled = 1;
 }
 
 void libtload_papi_thread_finish (thread_t *t)
 {
 	int retval;
-	uint32_t id;
 	
 	if (!papi_enabled)
 		return;
 	
-	id = t->order_id;
-	
-	ASSERT_PRINTF( ( retval = PAPI_stop( papi_per_thread[id].EventSet, papi_per_thread[id].values ) ) == PAPI_OK, "PAPI_stop %i\n", retval);
+	ASSERT_PRINTF( ( retval = PAPI_stop( t->EventSet, t->values ) ) == PAPI_OK, "PAPI_stop %i\n", retval);
 
-	retval = PAPI_cleanup_eventset( papi_per_thread[id].EventSet );
+	retval = PAPI_cleanup_eventset( t->EventSet );
 	ASSERT( retval == PAPI_OK )
-	retval = PAPI_destroy_eventset( &(papi_per_thread[id].EventSet) );
+	retval = PAPI_destroy_eventset( &(t->EventSet) );
 	ASSERT( retval == PAPI_OK )
 }
 
@@ -189,6 +180,9 @@ void libtload_papi_finish ()
 	
 	if (!papi_enabled)
 		return;
+	
+	papi_enabled = 0;
+	__sync_synchronize();
 
 	if (fname) {
 		fp = fopen(fname, "w");
@@ -203,7 +197,7 @@ void libtload_papi_finish ()
 		if (likely(t)) {
 			j = 0;
 			for ( i = start; i<=last; i++ ) {
-				dprintf("thread %-4i %-30s: %llu\n", t->order_id, native_counters_list[i], papi_per_thread[t->order_id].values[j] );
+				dprintf("thread %-4i %-30s: %llu\n", t->order_id, native_counters_list[i], t->values[j] );
 				j++;
 			}
 		}

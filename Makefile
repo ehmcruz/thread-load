@@ -23,8 +23,6 @@ papi: $(libnamedyn) $(libnamedynpapi)
 lib.o: lib.c $(headerfiles)
 	$(CC) -c lib.c -o lib.o $(CFLAGS)
 
-#######################
-
 connect.o: connect.c $(headerfiles)
 	$(CC) -c connect.c -o connect.o $(CFLAGS)
 
@@ -33,14 +31,17 @@ $(libnamedyn): connect.o lib.o
 
 #######################
 
+lib-papi.o: lib.c $(headerfiles)
+	$(CC) -c lib.c -o lib-papi.o $(CFLAGS) -DLIBTLOAD_SUPPORT_PAPI
+
 connect-papi.o: connect.c $(headerfiles)
 	$(CC) -c connect.c -o connect-papi.o $(CFLAGS) -DLIBTLOAD_SUPPORT_PAPI
 
 papi.o: papi.c $(headerfiles)
 	$(CC) -c papi.c -o papi.o $(CFLAGS) -DLIBTLOAD_SUPPORT_PAPI
 
-$(libnamedynpapi): connect-papi.o lib.o papi.o
-	$(CC) connect-papi.o lib.o papi.o -o $(libnamedynpapi) $(CFLAGS) $(LDFLAGS) -lpapi
+$(libnamedynpapi): connect-papi.o lib-papi.o papi.o
+	$(CC) connect-papi.o lib-papi.o papi.o -o $(libnamedynpapi) $(CFLAGS) $(LDFLAGS) -lpapi
 
 #######################
 

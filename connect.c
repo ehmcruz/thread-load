@@ -39,7 +39,7 @@ typedef struct real_args_t {
 	uint32_t order;
 } real_args_t;
 
-thread_t threads[MAX_THREADS] __attribute__ ((aligned(CACHE_LINE_SIZE)));
+thread_t libtload_threads[MAX_THREADS] __attribute__ ((aligned(CACHE_LINE_SIZE)));
 uint32_t libtload_nthreads_total = 0;
 static uint32_t alive_nthreads = 0;
 static spinlock_t threads_lock = SPINLOCK_INIT;
@@ -100,7 +100,7 @@ static void init()
 	uint32_t i;
 	
 	for (i=0; i<MAX_THREADS; i++) {
-		threads[i].stat = THREAD_AVL;
+		libtload_threads[i].stat = THREAD_AVL;
 		alive_threads[i] = NULL;
 		libtload_threads_by_order[i] = NULL;
 	}
@@ -169,7 +169,7 @@ static thread_t* thread_created (uint32_t order)
 
 	ASSERT_PRINTF(libtload_nthreads_total < MAX_THREADS, "Maximum number of threads reached! (%u)\n", MAX_THREADS)
 	
-	t = &threads[libtload_nthreads_total];
+	t = &libtload_threads[libtload_nthreads_total];
 
 	ASSERT(t->stat == THREAD_AVL)
 	
@@ -307,8 +307,8 @@ static void __attribute__((destructor)) triggered_on_app_end ()
 #ifdef LIBTLOAD_SUPPORT_PAPI
 {
 	for (i=0; i<MAX_THREADS; i++) {
-		if (threads[i].stat == THREAD_ALIVE) {
-			libtload_papi_thread_finish(&threads[i]);
+		if (libtload_threads[i].stat == THREAD_ALIVE) {
+			libtload_papi_thread_finish(&libtload_threads[i]);
 		}
 	}
 	libtload_papi_finish();

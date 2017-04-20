@@ -7,6 +7,10 @@
 #define MAX_THREADS 1024
 #define CACHE_LINE_SIZE 64
 
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	#define PAPI_MAX_EVENTS 10
+#endif
+
 #define likely(x)       __builtin_expect((x),1)
 #define unlikely(x)     __builtin_expect((x),0)
 
@@ -36,6 +40,12 @@ typedef struct thread_t {
 	uint32_t pos;
 	uint32_t alive_pos;
 	thread_stat_t stat;
+
+#ifdef LIBTLOAD_SUPPORT_PAPI
+	int EventSet;
+	long long values[PAPI_MAX_EVENTS];
+	int event_count;
+#endif
 }  __attribute__ ((aligned(CACHE_LINE_SIZE))) thread_t;
 
 static inline uint32_t libtload_get_total_nthreads ()
