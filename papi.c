@@ -197,7 +197,7 @@ void libtload_papi_finish ()
 		if (likely(t)) {
 			j = 0;
 			for ( i = start; i<=last; i++ ) {
-				dprintf("thread %-4i %-30s: %llu\n", t->order_id, native_counters_list[i], t->values[j] );
+				stat_printf(t->order_id, native_counters_list[i], t->values[j]);
 				j++;
 			}
 		}

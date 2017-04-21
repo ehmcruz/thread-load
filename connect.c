@@ -320,7 +320,7 @@ static void __attribute__((destructor)) triggered_on_app_end ()
 		
 		if (likely(t) && t->stat == THREAD_ALIVE) {
 			load = get_thread_load(t->kernel_pid, t->kernel_tid);
-			dprintf("load of thread (%s) order_id %u is %llu\n", stat_str[t->stat], t->order_id, load);
+			stat_printf(t->order_id, "jiffies", load);
 		}
 	}
 }
