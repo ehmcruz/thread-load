@@ -1,9 +1,9 @@
 CC=gcc
 CPP=g++
 AR=ar
-CFLAGS=-O2 -fPIC -ggdb -Wall
+CFLAGS=-O2 -fPIC -ggdb -Wall -I$(HOME)/papi/include/
 CPPFLAGS=$(CFLAGS)
-LDFLAGS=-lpthread -shared -Wl,--no-as-needed -ldl
+LDFLAGS=-lpthread -shared -Wl,--no-as-needed -ldl -L$(HOME)/papi/lib/ -lpapi
 
 headerfiles=$(wildcard *.h)
 
