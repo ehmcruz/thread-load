@@ -274,6 +274,17 @@ void WRAPPER_LABEL(pthread_exit) (void *retval)
 	REAL_LABEL(pthread_exit)(retval);
 }
 
+static void* time_monitor ()
+{
+	int SEG = 1;
+	if(getenv("PAPI_TIME"))
+		SEG = atoi(getenv("PAPI_TIME"));
+
+	usleep(SEG*1000000);
+	exit(1);
+	return NULL;
+}
+
 static void __attribute__((constructor)) triggered_on_app_start ()
 {
 	ATTACH_FUNC(pthread_create)
@@ -292,6 +303,11 @@ static void __attribute__((constructor)) triggered_on_app_start ()
 #ifdef LIBTLOAD_SUPPORT_PAPI
 	libtload_papi_thread_init(thread);
 #endif
+
+	pthread_t *ts = malloc(sizeof(pthread_t));
+
+	pthread_create(&ts, NULL, time_monitor, NULL);
+
 
 	dprintf("initialized!\n");
 }
