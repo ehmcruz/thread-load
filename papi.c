@@ -19,7 +19,7 @@
 */
 
 extern thread_t libtload_threads[MAX_THREADS];
-
+static uint32_t IPC=0;
 static uint32_t total_event_count;
 static char *fname, *fname_results = NULL;
 static int start, last;
@@ -88,7 +88,11 @@ void libtload_papi_init ()
 		dprintf("papi env var PAPI_COUNTER_LIST undefined, disabling PAPI\n");
 		return;
 	}
-	
+	if(strcmp(counter_list, "IPC") == 0){
+		IPC = 1;
+		counter_list = "PAPI_TOT_CYC,PAPI_TOT_INS";
+	}
+
 	fname = libtload_env_get_str("PAPI_FNAME_LOCK");
 	if (fname == NULL) {
 		dprintf("papi env var PAPI_FNAME_LOCK undefined, init from beginning\n");
@@ -195,6 +199,11 @@ void libtload_papi_finish ()
 		t = libtload_threads_by_order[id];
 		
 		if (likely(t)) {
+			if(IPC){
+				if(t->order_id != 1)
+                                stat_printf3(t->order_id, "PAPI_IPC", (double) t->values[1] / (double) t->values[0]);
+			}
+
 			j = 0;
 			for ( i = start; i<=last; i++ ) {
 				stat_printf(t->order_id, native_counters_list[i], t->values[j]);

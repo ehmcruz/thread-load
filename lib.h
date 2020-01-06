@@ -25,6 +25,7 @@
 
 #define dprintf(...) printf("task load lib: " __VA_ARGS__)
 #define stat_printf(tid, name, value) printf("task load lib: statistic of thread %u %s %llu\n", (tid), name, (value))
+#define stat_printf3(tid, name, value) printf("task load lib: statistic of thread %u %s %.2lf\n", (tid), name, (value))
 
 typedef uint16_t thread_stat_t;
 
